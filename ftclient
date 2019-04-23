@@ -1,0 +1,200 @@
+#!/usr/bin/python3.6
+
+# Anne Harris harranne@oregonstate.edu
+# CS 372 - 400
+# Project 2
+# Last Modified 3/8/2019
+# Description: This is the client side of a file transfer program
+# The user can request a list of the files in the current working 
+# directory or can request to get the contents of a file
+# Must create new connection to sever each time
+
+###########################################
+# CLIENT
+###########################################
+
+# import libraries
+import socket
+import sys
+import signal
+import time
+import os
+
+# Sources
+# Source: https://docs.python.org/3.6/library/socket.html
+# Source: "Computer Networking - A top-down Approach" 7 ed. Kurose & Ross,  pgs 164 -170
+# Source: CS 344 Program 4 by Anne Harris - Course by Benjamin Brewster
+# Source: www.tutorialspoint.com/python
+
+# COMMAND LINE:
+# [0]PROGRAM [1]FLIP [2]PORT [3]COMMAND [4]PORT 2
+# [0]PROGRAM [1]FLIP [2]PORT [3]COMMAND [4]TEXT FILE [5]PORT 2
+
+# ensure number of command line arguments is at least 5
+numArgs = len(sys.argv)
+# list command
+if numArgs == 5:
+    command = 1
+# text file
+elif numArgs > 5:
+    command = 2
+
+#print("Number of arguments is: " + str(numArgs))
+
+# get server from command line
+serverHost = sys.argv[1]
+#print("ServerHost: " + serverHost)
+
+# get port from command line
+serverPort = int(sys.argv[2])
+
+# create client socket
+clientSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+# connect to socket
+# This is the TCP control connection
+clientSocket.connect((serverHost, serverPort))
+
+# get command
+clientCommand = sys.argv[3]
+# check for valid command -l or -g to handle later
+if clientCommand == "-l" or clientCommand == "-g":
+    validCommand = 1
+else:
+    validCommand = 0
+
+
+# get other text/ data port number
+# command is for a list of files
+if command == 1:
+    # get port number
+    dataPort = int(sys.argv[4])
+    # combine command, port number and file name
+    # add % to seperate command, portnumber and @ for end of message
+    allInfo = clientCommand + "%" + str(dataPort) + "@"
+    #print("Total message is: " + allInfo)
+    
+    # send the information
+    clientSocket.send(allInfo.encode('utf-8'))
+
+    # if a valid command was sent
+    if validCommand == 1:
+        #create second socket
+        clientSocket2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        clientSocket2.connect((serverHost, dataPort))
+
+        print("Receiving directory structure from " + serverHost + ":" + str(dataPort))
+
+        # recieve data
+        returnedInfo = clientSocket2.recv(1000).decode()
+        if len(returnedInfo) < 0:
+            print("error with recv")
+   
+        #print(returnedInfo)
+        #split up commma delineated lists of files
+        returnedList = returnedInfo.split(",")
+
+        #print out list of files
+        for x in range(len(returnedList)):
+            print(returnedList[x])
+       
+        #close socket
+        clientSocket2.close()
+    # if the command was invalid, prepare to recieve message from server
+    else:
+        invalidRecv = clientSocket.recv(100).decode()
+        print(invalidRecv)
+# command to get data
+elif command == 2:
+    # get file name
+    dataFileName = sys.argv[4]
+    # get port number
+    dataPort = int(sys.argv[5])
+    # combine command, port number and file name
+    # add % to seperate command, portnumber, @ to seperate port number and file name, $ for end
+    allInfo = clientCommand + "%" + str(dataPort) + "@" + dataFileName + "$"
+    #print("Total message is: " + allInfo)
+    
+    # send the information
+    clientSocket.send(allInfo.encode('utf-8'))
+
+    #if it was a valid command being sent
+    if validCommand == 1:
+        #create second socket
+        clientSocket2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        clientSocket2.connect((serverHost, dataPort))
+
+        #open file
+        #create file name with "_copy" as a post fix
+        newFile = dataFileName + "_copy"
+
+        #check for exisiting file
+        #if file with "_copy" exists, replace it
+        if os.path.exists(newFile):
+            os.remove(newFile); 
+
+        #open file for appending
+        f = open(newFile, "a")
+
+        print("Receiving " + dataFileName + " from " + serverHost + ":" + str(dataPort))
+
+        # recieve data variables
+        recvdBytes = 0;
+
+        # variable to keep track of a bad file name sent
+        bad = 0
+        #while there is still data being sent, recieve data
+        while recvdBytes != 1:
+            returnedInfo = clientSocket2.recv(1024).decode()
+            if len(returnedInfo) < 0:
+                print("Error with receive")
+                break
+
+            #print(returnedInfo)
+        
+            #check for file not found error
+            possibleError = returnedInfo[-14:]
+            #print(possibleError)
+            if possibleError == "FILE NOT FOUND":
+                os.remove(newFile) #remove file that would have been created
+                bad = 1 #set bad file variable to 1
+                print(returnedInfo) 
+                break
+
+            #get the total number of bytes received
+            recvdBytes = len(returnedInfo)
+
+            #variable to keep track of the end of the file being sent
+            theEnd = 0
+
+            #check to see if it's the last piece of the txt file, will be less than 1024
+            if recvdBytes > 1 and recvdBytes < 1024:
+                #if it is the last, truncate the ending file marker @ symbol
+                returnedInfo = returnedInfo[:-1]
+                theEnd = 1
+            #if there is no more data to send, break
+            if recvdBytes == 1 or recvdBytes == 0:
+                #print("length of returned info is: " + str(recvdBytes))
+                break
+            #write to file
+            else:
+                f.write(returnedInfo)
+                #print("length of returned info is: " + str(recvdBytes))
+                if theEnd == 1: #if the end was reached, break
+                    break
+        # only print transfer complete if file was good
+        if bad != 1:
+            print("File transfer complete.")
+    
+        #close the file
+        f.close()
+    
+        #close socket
+        clientSocket2.close()
+    #invalid command
+    else:
+        invalidRecv = clientSocket.recv(100).decode()
+        print(invalidRecv)
+        
+
+# close connection
+clientSocket.close()
